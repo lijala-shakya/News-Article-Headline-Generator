@@ -46,6 +46,7 @@ news_headline/
 ├── pyproject.toml                       # Project metadata & dependencies (uv)
 ├── uv.lock                             # Locked dependency versions
 ├── .gitignore
+├── finetune.ipynb                      # Colab training notebook for LoRA adapter
 ├── README.md                           # ← this file
 │
 ├── apps/                               # Core application modules
