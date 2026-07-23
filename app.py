@@ -221,18 +221,9 @@ html, body, [class*="css"] {{
 st.markdown(CSS, unsafe_allow_html=True)
 
 
-def render_warnings(warnings: list[str], show_detail: bool) -> None:
-    """Renders validation warnings as caution notices. When show_detail is
-    False, collapses the noisy per-headline 'Dropped headline with
-    unsupported detail...' / 'Dropped N headline(s) exceeding...' messages
-    into short counts instead of listing each one -- useful once you trust
-    the pipeline and just want to know something was filtered, not see
-    every rejected candidate."""
+def render_warnings(warnings: list[str]) -> None:
+    """Renders validation warnings as collapsed caution notices."""
     if not warnings:
-        return
-    if show_detail:
-        for w in warnings:
-            st.markdown(f'<div class="caution">{w}</div>', unsafe_allow_html=True)
         return
 
     unsupported_count = sum(1 for w in warnings if w.startswith("Dropped headline with unsupported detail"))
@@ -258,16 +249,6 @@ def render_warnings(warnings: list[str], show_detail: bool) -> None:
         st.markdown(f'<div class="caution">{w}</div>', unsafe_allow_html=True)
 
 
-def render_raw_output(label: str, raw_candidates: list[str]) -> None:
-    """Shows the model's unvalidated output for debugging -- what it
-    actually generated before dedup/length/grounding filtering touched it."""
-    if not raw_candidates:
-        return
-    with st.expander(f"Raw {label} output (debug, before validation)"):
-        for i, h in enumerate(raw_candidates, start=1):
-            st.code(h, language=None)
-
-
 WIRE_CODES = ["AP-NPL", "RTR-14", "UPI-07", "TEL-22", "WIRE-9"]
 
 st.markdown(
@@ -285,17 +266,28 @@ with st.sidebar:
     st.markdown('<div class="slip-label">Transmission Settings</div>', unsafe_allow_html=True)
 
     compare_mode = st.checkbox(
-        "Also compare against the Groq API (Task 1)",
-        help="Optional -- requires GROQ_API_KEY in your .env. The fine-tuned "
-        "local model above is now the primary generator and needs no API key.",
+        "Also compare against the Groq API",
+        help="Optional -- requires GROQ_API_KEY in your .env.",
     )
 
     num_candidates = st.slider("Number of headlines", 1, 10, 4)
     max_chars = st.slider("Max characters", 30, 120, 70)
 
-    # Both Groq and the fine-tuned model now follow the same max_chars slider.
-    # Groq is prompted to target headlines of approximately max_chars length,
-    # and the local model's token budget is derived from max_chars.
+    st.markdown('<div class="slip-label">Sampling Controls</div>', unsafe_allow_html=True)
+
+    temperature = st.slider(
+        "Temperature",
+        min_value=0.1, max_value=2.0, value=0.8, step=0.05,
+        help="Controls randomness. Higher = more diverse headlines; "
+        "lower = more conservative/predictable.",
+    )
+    top_p = st.slider(
+        "Top-p (nucleus sampling)",
+        min_value=0.1, max_value=1.0, value=0.92, step=0.01,
+        help="Nucleus sampling threshold. Lower = more focused output; "
+        "higher = more variety.",
+    )
+
     min_length_ratio = 0.0
 
     if not compare_mode:
@@ -332,9 +324,6 @@ with st.sidebar:
     st.markdown('<div class="slip-label">About This Desk</div>', unsafe_allow_html=True)
     st.caption(
         "A production-style news headline generator that uses two parallel backends: a fine-tuned local model and/or the Groq API"
-        # "removed, anything over the character limit is dropped, and any   flan-t5-small + LoRA adapter, trained via Google Colab) "
-        # "name or number not found in the source article is filtered out "
-        # "as an unsupported detail."
     )
 
     if st.session_state.get("scraped_text"):
@@ -342,26 +331,7 @@ with st.sidebar:
             st.session_state.scraped_text = ""
             st.rerun()
 
-    # st.markdown('<div class="slip-label">Display Options</div>', unsafe_allow_html=True)
-
-    # show_detailed_warnings = st.checkbox(
-    #     "Show detailed validation warnings",
-    #     value=False,
-    #     help="When off, per-headline drop reasons are collapsed into short "
-    #     "counts (e.g. 'Filtered 2 headline(s)...') instead of listing each "
-    #     "rejected candidate individually.",
-    # )
-    # show_raw_output = st.checkbox(
-    #     "Show raw model output (debug)",
-    #     value=False,
-    #     help="Shows each backend's unvalidated output before dedup/length/"
-    #     "grounding filtering -- useful for diagnosing model quality issues.",
-    # )
-    show_detailed_warnings = False
-    show_raw_output = False
-
     st.markdown('<div class="slip-label">Performance</div>', unsafe_allow_html=True)
-
     try:
         import torch
         _device_note = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
@@ -413,7 +383,6 @@ if go:
     if not article_text.strip():
         st.error("No copy on the wire yet — paste an article above first.")
     elif compare_mode:
-        # Increment generation counter so each click produces fresh headlines
         st.session_state.generation_id += 1
         with st.spinner("Wiring both desks..."):
             try:
@@ -424,6 +393,9 @@ if go:
                     max_chars=max_chars,
                     min_length_ratio=min_length_ratio,
                     seed=st.session_state.generation_id,
+                    temperature_groq=temperature,
+                    temperature_local=temperature,
+                    top_p_local=top_p,
                 )
             except Exception as e:
                 st.error(f"Transmission failed: {e}")
@@ -435,20 +407,15 @@ if go:
                 st.markdown('<div class="desk-label">Fine-Tuned Desk (Primary)</div>', unsafe_allow_html=True)
                 if result["local_finetuned_headlines"]:
                     for i, h in enumerate(result["local_finetuned_headlines"], start=1):
-                        stamp =""
                         st.markdown(
-                            f"""<div class="ticket">{stamp}
+                            f"""<div class="ticket">
                                 <div class="ticket-meta">CANDIDATE {i:02d} &middot; {len(h)} CHARS &middot; LOCAL MODEL</div>
                                 <div class="ticket-head">{h}</div>""",
                             unsafe_allow_html=True,
                         )
-                    # Only show warnings expander when checkbox is ticked
-                    if show_detailed_warnings and result["local_warnings"]:
+                    if result["local_warnings"]:
                         with st.expander("Fine-tuned desk notes (validation warnings)"):
-                            render_warnings(result["local_warnings"], show_detailed_warnings)
-                    # Only show raw output expander when checkbox is ticked
-                    if show_raw_output:
-                        render_raw_output("fine-tuned", result["local_raw_candidates"])
+                            render_warnings(result["local_warnings"])
                 else:
                     st.markdown(
                         f'<div class="caution">LOCAL WIRE DOWN — {result["local_error"]}</div>',
@@ -458,9 +425,8 @@ if go:
                 st.markdown('<div class="desk-label">Groq Wire (Comparison)</div>', unsafe_allow_html=True)
                 if result["groq_candidates"]:
                     for i, h in enumerate(result["groq_candidates"], start=1):
-                        stamp =""
                         st.markdown(
-                            f"""<div class="ticket">{stamp}
+                            f"""<div class="ticket">
                                 <div class="ticket-meta">CANDIDATE {i:02d} &middot; {style.upper()}</div>
                                 <div class="ticket-head">{h}</div>""",
                             unsafe_allow_html=True,
@@ -470,15 +436,10 @@ if go:
                         '<div class="caution">No Groq candidates survived validation.</div>',
                         unsafe_allow_html=True,
                     )
-                # Only show warnings expander when checkbox is ticked
-                if show_detailed_warnings and result["groq_warnings"]:
+                if result["groq_warnings"]:
                     with st.expander("Groq desk notes (validation warnings)"):
-                        render_warnings(result["groq_warnings"], show_detailed_warnings)
-                # Only show raw output expander when checkbox is ticked
-                if show_raw_output:
-                    render_raw_output("Groq", result["groq_raw_candidates"])
+                        render_warnings(result["groq_warnings"])
     else:
-        # Increment generation counter so each click produces fresh headlines
         st.session_state.generation_id += 1
         with st.spinner("Wiring the desk..."):
             try:
@@ -487,6 +448,8 @@ if go:
                     num_candidates=num_candidates,
                     max_chars=max_chars,
                     seed=st.session_state.generation_id,
+                    temperature=temperature,
+                    top_p=top_p,
                 )
             except Exception as e:
                 st.error(f"Transmission failed: {e}")
@@ -495,18 +458,13 @@ if go:
         if result:
             st.markdown('<div class="slip-label">Wire Output</div>', unsafe_allow_html=True)
             for i, h in enumerate(result.candidates, start=1):
-                stamp =""
                 st.markdown(
-                    f"""<div class="ticket">{stamp}
+                    f"""<div class="ticket">
                         <div class="ticket-meta">CANDIDATE {i:02d} &middot; {h.char_count} CHARS &middot; FINE-TUNED</div>
                         <div class="ticket-head">{h.text}</div>""",
                     unsafe_allow_html=True,
                 )
 
-            # Only show warnings expander when checkbox is ticked
-            if show_detailed_warnings and result.warnings:
+            if result.warnings:
                 with st.expander("Desk notes (validation warnings)"):
-                    render_warnings(result.warnings, show_detailed_warnings)
-            # Only show raw output expander when checkbox is ticked
-            if show_raw_output:
-                render_raw_output("fine-tuned", result.raw_candidates)
+                    render_warnings(result.warnings)

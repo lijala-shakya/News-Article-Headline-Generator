@@ -17,6 +17,7 @@ def generate_headlines(
     max_chars: int = 70,
     min_length_ratio: float = 0.6,
     seed: int | None = None,
+    temperature: float = 0.8,
 ) -> HeadlineResponse:
     """
     Main entry point. Validates input, calls the model, validates output,
@@ -28,6 +29,10 @@ def generate_headlines(
 
     seed: optional seed for varied output on regeneration. Pass a different
     value each time you click generate to get fresh headlines for the same article.
+
+    temperature: controls randomness in Groq's sampling. Higher values (e.g. 1.2)
+    produce more diverse headlines; lower values (e.g. 0.3) more conservative.
+    Range 0.1–2.0. Default 0.8.
     """
     article = ArticleInput(
         text=article_text,
@@ -47,6 +52,7 @@ def generate_headlines(
             max_chars=article.max_chars,
             min_length_ratio=min_length_ratio,
             seed=seed,
+            temperature=temperature,
         )
         validated, warnings = build_validated_headlines(
             raw_headlines=raw,
@@ -75,6 +81,8 @@ def generate_headlines_local(
     num_candidates: int = 3,
     max_chars: int = 70,
     seed: int | None = None,
+    temperature: float = 0.85,
+    top_p: float = 0.92,
 ) -> HeadlineResponse:
     """
     Primary entry point using ONLY the fine-tuned local model -- no API call,
@@ -90,6 +98,9 @@ def generate_headlines_local(
 
     seed: optional seed for varied output on regeneration. Pass a different
     value each time you click generate to get fresh headlines for the same article.
+
+    temperature: controls randomness in local model sampling. Range 0.1–2.0. Default 0.85.
+    top_p: nucleus sampling threshold. Range 0.1–1.0. Default 0.92.
     """
     article = ArticleInput(
         text=article_text,
@@ -109,6 +120,8 @@ def generate_headlines_local(
             num_candidates=article.num_candidates,
             max_chars=article.max_chars,
             seed=seed,
+            temperature=temperature,
+            top_p=top_p,
         )
         validated, warnings = build_validated_headlines(
             raw_headlines=raw,
@@ -131,7 +144,7 @@ def generate_headlines_local(
         validated, _ = build_validated_headlines(
             raw_headlines=raw,
             article_text=article.text,
-            max_chars=max_chars * 2,  # relax the length filter as a fallback
+            max_chars=max_chars,
             num_candidates=article.num_candidates,
         )
 
@@ -151,6 +164,9 @@ def generate_headlines_with_comparison(
     max_chars: int = 70,
     min_length_ratio: float = 0.6,
     seed: int | None = None,
+    temperature_groq: float = 0.8,
+    temperature_local: float = 0.85,
+    top_p_local: float = 0.92,
 ) -> dict:
     """
     Runs the Groq pipeline AND the local fine-tuned model on the same article,
@@ -181,17 +197,23 @@ def generate_headlines_with_comparison(
         max_chars=max_chars,
         min_length_ratio=min_length_ratio,
         seed=seed,
+        temperature=temperature_groq,
     )
 
     try:
         if local_count > 0:
+            # Request extra raw candidates so validation filtering doesn't
+            # leave us with fewer headlines than requested.
+            local_raw_count = local_count * 3
             local_result = generate_headlines_local(
                 article_text=article_text,
-                num_candidates=local_count,
+                num_candidates=local_raw_count,
                 max_chars=max_chars,
-                seed=seed if seed is not None else (seed or 0) + 1,
+                seed=seed,
+                temperature=temperature_local,
+                top_p=top_p_local,
             )
-            local_headlines = [h.text for h in local_result.candidates]
+            local_headlines = [h.text for h in local_result.candidates][:local_count]
             local_warnings = local_result.warnings
             local_raw = local_result.raw_candidates
         else:

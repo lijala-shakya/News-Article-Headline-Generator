@@ -107,6 +107,7 @@ def generate_raw_headlines(
     max_chars: int,
     min_length_ratio: float = 0.0,
     seed: int | None = None,
+    temperature: float = 0.8,
 ) -> list[str]:
     """Generate headlines using the tuned local model when enabled, otherwise fall back to Groq.
 
@@ -115,7 +116,12 @@ def generate_raw_headlines(
     doesn't default to short fragments that technically fit under max_chars
     but are too vague to be useful.
 
-    seed: optional seed/identifier used to request varied output on regeneration.
+    seed: optional seed passed to the Groq API for truly diverse output on
+    re-generation. Each unique seed triggers different random sampling in
+    the model, producing fresh headlines every click.
+
+    temperature: controls randomness in Groq's sampling. Higher (e.g. 1.2) =
+    more diverse; lower (e.g. 0.3) = more conservative. Default 0.8.
     """
     if should_use_local_model():
         try:
@@ -160,19 +166,22 @@ def generate_raw_headlines(
         f"{article_text}"
     )
 
-    # Add seed to the user prompt to vary output on regeneration
-    if seed is not None:
-        user_prompt += f"\n\n(Variation seed: {seed})"
-
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
+    # Build kwargs for the API call. Use Groq's native seed parameter for
+    # genuine randomness -- passing 'seed' as text in the prompt is too weak
+    # and often produces identical results even when the seed string changes.
+    api_kwargs = {
+        "model": MODEL_NAME,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.8,
-        response_format={"type": "json_object"},
-    )
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+    }
+    if seed is not None:
+        api_kwargs["seed"] = seed
+
+    response = client.chat.completions.create(**api_kwargs)
 
     raw = response.choices[0].message.content
     parsed = json.loads(raw)
