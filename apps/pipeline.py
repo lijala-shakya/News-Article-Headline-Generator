@@ -202,8 +202,6 @@ def generate_headlines_with_comparison(
 
     try:
         if local_count > 0:
-            # Request extra raw candidates so validation filtering doesn't
-            # leave us with fewer headlines than requested.
             local_raw_count = local_count * 3
             local_result = generate_headlines_local(
                 article_text=article_text,

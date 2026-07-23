@@ -17,18 +17,11 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from peft import PeftModel
 
-# Resolve the adapter relative to the repository so the Colab export works out
-# of the box when it lives under Tuning-in-colab/headline-lora-adapter.
 DEFAULT_ADAPTER_DIR = Path(__file__).resolve().parents[1] / "Tuning-in-colab" / "headline-lora-adapter"
 ADAPTER_PATH = os.getenv("LORA_ADAPTER_PATH", str(DEFAULT_ADAPTER_DIR))
 BASE_MODEL_NAME = "google/flan-t5-small"
 PREFIX = "generate headline: "
-# 128 tokens was cutting scraped articles off after the first paragraph or
-# two, before the actual newsworthy fact -- e.g. an article that opens with
-# scene-setting ("...Hudson River...") and states the real news several
-# sentences later would never let the model see the real news at all.
-# flan-t5-small's encoder supports up to 512 tokens; 384 gives real headroom
-# for full articles while staying well within that limit.
+
 MAX_INPUT_LEN = 384
 MAX_TARGET_LEN = 32
 
@@ -43,16 +36,6 @@ def _load_local_model():
             f"and place it at that path, or set LORA_ADAPTER_PATH in your .env."
         )
 
-    # Load the tokenizer from the base model, not the adapter directory.
-    # LoRA fine-tuning only adds small low-rank weight deltas -- it doesn't
-    # touch the tokenizer or vocabulary, so the adapter folder's copy of the
-    # tokenizer (if one was even saved there) should be identical to the
-    # base model's. If that copy is stale, partial, or was accidentally
-    # exported from a different checkpoint, decoding generated token IDs
-    # through it produces garbled/mismatched text -- which is consistent
-    # with model output containing broken word fragments across unrelated
-    # articles. Loading straight from the base model sidesteps that risk
-    # entirely.
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
     base_model = AutoModelForSeq2SeqLM.from_pretrained(BASE_MODEL_NAME)
     model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
@@ -127,14 +110,8 @@ def generate_local_headlines(
 
     target_len = MAX_TARGET_LEN
     if max_chars is not None:
-        # ~3 chars/token gives a more generous budget so headlines can
-        # actually reach the target length without being cut short.
         target_len = max(10, min(MAX_TARGET_LEN, max_chars // 3))
 
-    # Use seed to vary the random state, ensuring different output each
-    # time the user clicks "Generate". Without this, PyTorch's default
-    # sampling RNG will produce the same sequence of random numbers on
-    # every call, leading to identical (or near-identical) headlines.
     if seed is not None:
         torch.manual_seed(seed)
         random.seed(seed)

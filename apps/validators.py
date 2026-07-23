@@ -93,11 +93,6 @@ def build_validated_headlines(
         )
         within_length = deduped[:1] if deduped else raw_headlines[:1]
 
-    # Grounding is now enforced, not just flagged: a headline containing a
-    # number or proper noun absent from the source article is dropped
-    # rather than shown with a warning attached, since prior local-model
-    # runs showed fabricated entities (e.g. "Little Mermaid", "Twitter",
-    # "passport fraud") reaching the UI unfiltered.
     grounded: list[str] = []
     dropped_count = 0
     for h in within_length:
@@ -112,9 +107,7 @@ def build_validated_headlines(
             grounded.append(h)
 
     if not grounded:
-        # Every candidate failed grounding -- rather than showing nothing,
-        # fall back to the least-unsupported original candidate so the user
-        # still gets output, with a clear warning that it wasn't verified.
+
         warnings.append(
             "All candidates contained unsupported details — showing the "
             "original best-effort candidate, unverified."
